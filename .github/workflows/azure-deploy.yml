@@ -5,14 +5,19 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
     inputs:
-      deployment_slot:
-        description: 'Select deployment slot'
+      webapp_name:
+        description: 'Azure Web App to deploy to'
         required: true
-        default: 'production'
         type: choice
         options:
-          - production
-          - staging
+          - default
+          - secondary
+        default: 'default'
+      deployment_slot:
+        description: 'Deployment slot'
+        required: false
+        type: string
+        default: 'production'
 
 jobs:
   # Stage 1: Checkout Code
@@ -55,19 +60,28 @@ jobs:
         id: deploy-to-webapp
         uses: azure/webapps-deploy@v2
         with:
-          app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
+          app-name: ${{ github.event.inputs.webapp_name == 'secondary' && secrets.AZURE_WEBAPP_NAME_SECONDARY || secrets.AZURE_WEBAPP_NAME }}
           package: .
-          slot-name: ${{ github.event.inputs.deployment_slot || 'production' }}
+          slot-name: ${{ github.event.inputs.deployment_slot }}
           startup-command: "php -S 0.0.0.0:8080"
       # Set the webapp URL as an output variable and display deployment URL
       - name: Set and display webapp URL
         id: set-url
         run: |
           # Using the newer GitHub Actions output syntax
-          if [[ "${{ github.event.inputs.deployment_slot }}" == "production" || "${{ github.event.inputs.deployment_slot }}" == "" ]]; then
-            WEBAPP_URL="https://${{ secrets.AZURE_WEBAPP_NAME }}.azurewebsites.net"
+          # Determine which webapp name to use based on the input
+          if [[ "${{ github.event.inputs.webapp_name }}" == "secondary" ]]; then
+            WEBAPP_NAME="${{ secrets.AZURE_WEBAPP_NAME_SECONDARY }}"
           else
-            WEBAPP_URL="https://${{ secrets.AZURE_WEBAPP_NAME }}-${{ github.event.inputs.deployment_slot }}.azurewebsites.net"
+            WEBAPP_NAME="${{ secrets.AZURE_WEBAPP_NAME }}"
           fi
+          
+          # Determine the URL based on the deployment slot
+          if [[ "${{ github.event.inputs.deployment_slot }}" == "production" ]]; then
+            WEBAPP_URL="https://${WEBAPP_NAME}.azurewebsites.net"
+          else
+            WEBAPP_URL="https://${WEBAPP_NAME}-${{ github.event.inputs.deployment_slot }}.azurewebsites.net"
+          fi
+          
           echo "webapp-url=$WEBAPP_URL" >> $GITHUB_OUTPUT
-          echo "::notice::Deployed to: $WEBAPP_URL (Slot: ${{ github.event.inputs.deployment_slot || 'production' }})"
+          echo "::notice::Deployed to: $WEBAPP_URL (Web App: ${WEBAPP_NAME}, Slot: ${{ github.event.inputs.deployment_slot }})"
