@@ -33,6 +33,8 @@ jobs:
     name: Deploy to Azure
     needs: prepare
     runs-on: ubuntu-latest
+    environment: production
+    # Environment protection rules will require approval before deployment
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
@@ -41,8 +43,17 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
       - name: Deploy to Azure Web App
+        id: deploy-to-webapp
         uses: azure/webapps-deploy@v2
         with:
           app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
           package: .
           startup-command: "php -S 0.0.0.0:8080"
+      # Set the webapp URL as an output variable and display deployment URL
+      - name: Set and display webapp URL
+        id: set-url
+        run: |
+          # Using the newer GitHub Actions output syntax
+          WEBAPP_URL="https://${{ secrets.AZURE_WEBAPP_NAME }}.azurewebsites.net"
+          echo "webapp-url=$WEBAPP_URL" >> $GITHUB_OUTPUT
+          echo "::notice::Deployed to: $WEBAPP_URL"
