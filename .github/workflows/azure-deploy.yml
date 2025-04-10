@@ -33,9 +33,10 @@ jobs:
     name: Deploy to Azure
     needs: prepare
     runs-on: ubuntu-latest
-    environment: production
-     url: ${{ steps.set-url.outputs.webapp-url }}
-      steps:
+    environment:
+      name: production
+      url: ${{ steps.set-url.outputs.webapp-url }}
+    steps:
       - name: Checkout repository
         uses: actions/checkout@v2
       - name: Login to Azure
