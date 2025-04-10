@@ -4,6 +4,15 @@ on:
   push:
     branches: [ main, master ]
   workflow_dispatch:
+    inputs:
+      deployment_slot:
+        description: 'Select deployment slot'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
 
 jobs:
   # Stage 1: Checkout Code
@@ -33,7 +42,7 @@ jobs:
     name: Deploy to Azure
     needs: prepare
     runs-on: ubuntu-latest
-    environment: production
+    environment: ${{ github.event.inputs.deployment_slot || 'production' }}
     # Environment protection rules will require approval before deployment
     steps:
       - name: Checkout repository
@@ -48,12 +57,17 @@ jobs:
         with:
           app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
           package: .
+          slot-name: ${{ github.event.inputs.deployment_slot || 'production' }}
           startup-command: "php -S 0.0.0.0:8080"
       # Set the webapp URL as an output variable and display deployment URL
       - name: Set and display webapp URL
         id: set-url
         run: |
           # Using the newer GitHub Actions output syntax
-          WEBAPP_URL="https://${{ secrets.AZURE_WEBAPP_NAME }}.azurewebsites.net"
+          if [[ "${{ github.event.inputs.deployment_slot }}" == "production" || "${{ github.event.inputs.deployment_slot }}" == "" ]]; then
+            WEBAPP_URL="https://${{ secrets.AZURE_WEBAPP_NAME }}.azurewebsites.net"
+          else
+            WEBAPP_URL="https://${{ secrets.AZURE_WEBAPP_NAME }}-${{ github.event.inputs.deployment_slot }}.azurewebsites.net"
+          fi
           echo "webapp-url=$WEBAPP_URL" >> $GITHUB_OUTPUT
-          echo "::notice::Deployed to: $WEBAPP_URL"
+          echo "::notice::Deployed to: $WEBAPP_URL (Slot: ${{ github.event.inputs.deployment_slot || 'production' }})"
