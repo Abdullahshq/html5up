@@ -4,25 +4,6 @@ on:
   push:
     branches: [ main, master ]
   workflow_dispatch:
-    inputs:
-      webapp_name:
-        description: 'Azure Web App to deploy to'
-        required: true
-        type: choice
-        options:
-          - default
-          - secondary
-        default: 'default'
-      deployment_slot:
-        description: 'Deployment slot'
-        required: true
-        type: choice
-        options:
-          - production
-          - staging
-          - development
-          - test
-        default: 'production'
 
 jobs:
   # Stage 1: Checkout Code
@@ -52,10 +33,9 @@ jobs:
     name: Deploy to Azure
     needs: prepare
     runs-on: ubuntu-latest
-    environment:
-      name: ${{ github.event.inputs.deployment_slot == 'production' && 'production' || github.event.inputs.webapp_name }}-${{ github.event.inputs.deployment_slot }}
-      url: ${{ steps.set-url.outputs.webapp-url }}
-    steps:
+    environment: production
+     url: ${{ steps.set-url.outputs.webapp-url }}
+      steps:
       - name: Checkout repository
         uses: actions/checkout@v2
       - name: Login to Azure
@@ -70,37 +50,3 @@ jobs:
           package: .
           slot-name: ${{ github.event.inputs.deployment_slot }}
           startup-command: "php -S 0.0.0.0:8080"
-      # Set the webapp URL as an output variable and display deployment URL
-      - name: Set and display webapp URL
-        id: set-url
-        run: |
-          # Using the newer GitHub Actions output syntax
-          # Determine which webapp name to use based on the input
-          if [[ "${{ github.event.inputs.webapp_name }}" == "secondary" ]]; then
-            WEBAPP_NAME="${{ secrets.AZURE_WEBAPP_NAME_SECONDARY }}"
-          else
-            WEBAPP_NAME="${{ secrets.AZURE_WEBAPP_NAME }}"
-          fi
-          
-          # Determine the URL based on the deployment slot
-          if [[ "${{ github.event.inputs.deployment_slot }}" == "production" ]]; then
-            WEBAPP_URL="https://${WEBAPP_NAME}.azurewebsites.net"
-          else
-            WEBAPP_URL="https://${WEBAPP_NAME}-${{ github.event.inputs.deployment_slot }}.azurewebsites.net"
-          fi
-          
-          echo "webapp-url=$WEBAPP_URL" >> $GITHUB_OUTPUT
-          echo "::notice title=Deployment Information::Successfully deployed to: $WEBAPP_URL"
-          echo "::notice title=Deployment Details::Web App: ${WEBAPP_NAME}, Slot: ${{ github.event.inputs.deployment_slot }}"
-      
-      - name: Deployment Summary
-        run: |
-          echo "## Deployment Summary :rocket:" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "| --- | --- |" >> $GITHUB_STEP_SUMMARY
-          echo "| Web App | ${{ github.event.inputs.webapp_name == 'secondary' && secrets.AZURE_WEBAPP_NAME_SECONDARY || secrets.AZURE_WEBAPP_NAME }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Deployment Slot | ${{ github.event.inputs.deployment_slot }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Deployment URL | ${{ steps.set-url.outputs.webapp-url }} |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Deployment completed at $(date)" >> $GITHUB_STEP_SUMMARY
