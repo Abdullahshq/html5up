@@ -53,9 +53,8 @@ jobs:
     needs: prepare
     runs-on: ubuntu-latest
     environment:
-      name: ${{ github.event.inputs.webapp_name }}-${{ github.event.inputs.deployment_slot }}
+      name: ${{ github.event.inputs.deployment_slot == 'production' && 'production' || github.event.inputs.webapp_name }}-${{ github.event.inputs.deployment_slot }}
       url: ${{ steps.set-url.outputs.webapp-url }}
-    # Environment protection rules will require approval before deployment
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
