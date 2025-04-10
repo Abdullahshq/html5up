@@ -15,8 +15,13 @@ on:
         default: 'default'
       deployment_slot:
         description: 'Deployment slot'
-        required: false
-        type: string
+        required: true
+        type: choice
+        options:
+          - production
+          - staging
+          - development
+          - test
         default: 'production'
 
 jobs:
@@ -47,7 +52,9 @@ jobs:
     name: Deploy to Azure
     needs: prepare
     runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.deployment_slot || 'production' }}
+    environment:
+      name: ${{ github.event.inputs.webapp_name }}-${{ github.event.inputs.deployment_slot }}
+      url: ${{ steps.set-url.outputs.webapp-url }}
     # Environment protection rules will require approval before deployment
     steps:
       - name: Checkout repository
@@ -84,4 +91,17 @@ jobs:
           fi
           
           echo "webapp-url=$WEBAPP_URL" >> $GITHUB_OUTPUT
-          echo "::notice::Deployed to: $WEBAPP_URL (Web App: ${WEBAPP_NAME}, Slot: ${{ github.event.inputs.deployment_slot }})"
+          echo "::notice title=Deployment Information::Successfully deployed to: $WEBAPP_URL"
+          echo "::notice title=Deployment Details::Web App: ${WEBAPP_NAME}, Slot: ${{ github.event.inputs.deployment_slot }}"
+      
+      - name: Deployment Summary
+        run: |
+          echo "## Deployment Summary :rocket:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "| --- | --- |" >> $GITHUB_STEP_SUMMARY
+          echo "| Web App | ${{ github.event.inputs.webapp_name == 'secondary' && secrets.AZURE_WEBAPP_NAME_SECONDARY || secrets.AZURE_WEBAPP_NAME }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deployment Slot | ${{ github.event.inputs.deployment_slot }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deployment URL | ${{ steps.set-url.outputs.webapp-url }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Deployment completed at $(date)" >> $GITHUB_STEP_SUMMARY
