@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       webapp_name:
-        description: 'Web app name (lowercase alphanumeric and hyphens)'
+        description: 'abdhtml5up'
         required: true
         type: string
       resource_group:
