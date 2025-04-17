@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       webapp_name:
-        description: 'abdapp'
+        description: 'abdapp1'
         required: true
         type: string
       resource_group:
