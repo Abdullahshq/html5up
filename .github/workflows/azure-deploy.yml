@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       webapp_name:
-        description: 'Web app name'
+        description: 'Web app name (lowercase letters, numbers, and hyphens only)'
         required: true
         type: string
       resource_group:
@@ -48,7 +48,7 @@ jobs:
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: ${{ github.event.inputs.php_version || '8.0' }}
+          php-version: "${{ github.event.inputs.php_version || '8.0' }}"
           extensions: mbstring, intl, gd, xml, zip
       - name: Install dependencies
         run: |
@@ -68,14 +68,31 @@ jobs:
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
+      
+      - name: Validate inputs
+        run: |
+          # Validate webapp name (lowercase, alphanumeric, hyphens only)
+          WEBAPP_NAME="${{ github.event.inputs.webapp_name || secrets.AZURE_WEBAPP_NAME }}"
+          if ! [[ $WEBAPP_NAME =~ ^[a-z0-9\-]+$ ]]; then
+            echo "::error::Web app name must contain only lowercase letters, numbers, and hyphens"
+            exit 1
+          fi
+          
+          # Ensure we have valid location
+          LOCATION="${{ github.event.inputs.location || 'eastus' }}"
+          echo "Using location: $LOCATION"
+          
+          # Log Azure account information
+          echo "Verifying Azure authentication..."
+          az account show
           
       - name: Create Resource Group if not exists
         run: |
           RESOURCE_GROUP="${{ github.event.inputs.resource_group || secrets.AZURE_RESOURCE_GROUP }}"
           LOCATION="${{ github.event.inputs.location || 'eastus' }}"
           
-          # Check if resource group exists
-          if ! az group exists --name "$RESOURCE_GROUP"; then
+          echo "Checking if resource group $RESOURCE_GROUP exists..."
+          if ! az group show --name "$RESOURCE_GROUP" &>/dev/null; then
             echo "Creating resource group $RESOURCE_GROUP in $LOCATION"
             az group create --name "$RESOURCE_GROUP" --location "$LOCATION"
           else
@@ -93,7 +110,7 @@ jobs:
           # Create a unique name for app service plan
           APP_PLAN_NAME="${WEBAPP_NAME}-plan"
           
-          # Check if app service plan exists
+          echo "Checking if app service plan $APP_PLAN_NAME exists..."
           if ! az appservice plan show --name "$APP_PLAN_NAME" --resource-group "$RESOURCE_GROUP" &>/dev/null; then
             echo "Creating app service plan $APP_PLAN_NAME"
             az appservice plan create \
@@ -116,9 +133,10 @@ jobs:
           APP_PLAN_NAME="${{ steps.create-app-plan.outputs.app-plan-name }}"
           PHP_VERSION="${{ github.event.inputs.php_version || '8.0' }}"
           
-          # Check if web app exists
+          echo "Checking if web app $WEBAPP_NAME exists..."
           if ! az webapp show --name "$WEBAPP_NAME" --resource-group "$RESOURCE_GROUP" &>/dev/null; then
             echo "Creating web app $WEBAPP_NAME"
+            # Fix runtime syntax to ensure it matches Azure expectations
             az webapp create \
               --name "$WEBAPP_NAME" \
               --resource-group "$RESOURCE_GROUP" \
@@ -128,12 +146,19 @@ jobs:
             echo "Web app $WEBAPP_NAME already exists"
           fi
           
-          # Configure web app settings
+          # Set webapp configuration
+          echo "Configuring web app settings..."
           az webapp config set \
             --name "$WEBAPP_NAME" \
             --resource-group "$RESOURCE_GROUP" \
-            --php-version "$PHP_VERSION" \
-            --startup-file "php -S 0.0.0.0:8080"
+            --php-version "$PHP_VERSION"
+          
+          # Set startup command separately to avoid configuration issues
+          echo "Setting startup command..."
+          az webapp config appsettings set \
+            --name "$WEBAPP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --settings WEBSITE_STARTUP_COMMAND="php -S 0.0.0.0:8080"
           
           # Set the webapp URL as output
           WEBAPP_URL="https://${WEBAPP_NAME}.azurewebsites.net"
