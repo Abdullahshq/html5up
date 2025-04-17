@@ -9,7 +9,7 @@ on:
         required: true
         type: string
       resource_group:
-        description: 'Resource group name'
+        description: 'abd-rg'
         required: true
         type: string
       location:
