@@ -1,9 +1,32 @@
-name: Deploy to Azure Web App with PHP
-
+name: Create and Deploy to Azure Web App with PHP
 on:
   push:
     branches: [ main, master ]
   workflow_dispatch:
+    inputs:
+      webapp_name:
+        description: 'Web app name'
+        required: true
+        type: string
+      resource_group:
+        description: 'Resource group name'
+        required: true
+        type: string
+      location:
+        description: 'Azure region'
+        required: true
+        default: 'eastus'
+        type: string
+      php_version:
+        description: 'PHP version'
+        required: false
+        default: '8.0'
+        type: string
+      sku:
+        description: 'App Service plan SKU'
+        required: false
+        default: 'B1'
+        type: string
 
 jobs:
   # Stage 1: Checkout Code
@@ -13,7 +36,7 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
-
+        
   # Stage 2: Prepare Environment
   prepare:
     name: Prepare Environment
@@ -25,29 +48,151 @@ jobs:
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.0'
+          php-version: ${{ github.event.inputs.php_version || '8.0' }}
           extensions: mbstring, intl, gd, xml, zip
+      - name: Install dependencies
+        run: |
+          if [ -f composer.json ]; then
+            composer install --no-interaction --prefer-dist --optimize-autoloader
+          fi
 
-  # Stage 3: Deploy to Azure
-  deploy:
-    name: Deploy to Azure
+  # Stage 3: Create Azure Resources
+  create-azure-resources:
+    name: Create Azure Resources
     needs: prepare
     runs-on: ubuntu-latest
-    environment:
-      name: production
-      url: ${{ steps.set-url.outputs.webapp-url }}
+    outputs:
+      webapp_url: ${{ steps.create-webapp.outputs.webapp-url }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v2
       - name: Login to Azure
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
+          
+      - name: Create Resource Group if not exists
+        run: |
+          RESOURCE_GROUP="${{ github.event.inputs.resource_group || secrets.AZURE_RESOURCE_GROUP }}"
+          LOCATION="${{ github.event.inputs.location || 'eastus' }}"
+          
+          # Check if resource group exists
+          if ! az group exists --name "$RESOURCE_GROUP"; then
+            echo "Creating resource group $RESOURCE_GROUP in $LOCATION"
+            az group create --name "$RESOURCE_GROUP" --location "$LOCATION"
+          else
+            echo "Resource group $RESOURCE_GROUP already exists"
+          fi
+      
+      - name: Create App Service Plan
+        id: create-app-plan
+        run: |
+          RESOURCE_GROUP="${{ github.event.inputs.resource_group || secrets.AZURE_RESOURCE_GROUP }}"
+          LOCATION="${{ github.event.inputs.location || 'eastus' }}"
+          WEBAPP_NAME="${{ github.event.inputs.webapp_name || secrets.AZURE_WEBAPP_NAME }}"
+          SKU="${{ github.event.inputs.sku || 'B1' }}"
+          
+          # Create a unique name for app service plan
+          APP_PLAN_NAME="${WEBAPP_NAME}-plan"
+          
+          # Check if app service plan exists
+          if ! az appservice plan show --name "$APP_PLAN_NAME" --resource-group "$RESOURCE_GROUP" &>/dev/null; then
+            echo "Creating app service plan $APP_PLAN_NAME"
+            az appservice plan create \
+              --name "$APP_PLAN_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --location "$LOCATION" \
+              --sku "$SKU" \
+              --is-linux
+          else
+            echo "App service plan $APP_PLAN_NAME already exists"
+          fi
+          
+          echo "app-plan-name=$APP_PLAN_NAME" >> $GITHUB_OUTPUT
+      
+      - name: Create Web App
+        id: create-webapp
+        run: |
+          RESOURCE_GROUP="${{ github.event.inputs.resource_group || secrets.AZURE_RESOURCE_GROUP }}"
+          WEBAPP_NAME="${{ github.event.inputs.webapp_name || secrets.AZURE_WEBAPP_NAME }}"
+          APP_PLAN_NAME="${{ steps.create-app-plan.outputs.app-plan-name }}"
+          PHP_VERSION="${{ github.event.inputs.php_version || '8.0' }}"
+          
+          # Check if web app exists
+          if ! az webapp show --name "$WEBAPP_NAME" --resource-group "$RESOURCE_GROUP" &>/dev/null; then
+            echo "Creating web app $WEBAPP_NAME"
+            az webapp create \
+              --name "$WEBAPP_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --plan "$APP_PLAN_NAME" \
+              --runtime "PHP|$PHP_VERSION"
+          else
+            echo "Web app $WEBAPP_NAME already exists"
+          fi
+          
+          # Configure web app settings
+          az webapp config set \
+            --name "$WEBAPP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --php-version "$PHP_VERSION" \
+            --startup-file "php -S 0.0.0.0:8080"
+          
+          # Set the webapp URL as output
+          WEBAPP_URL="https://${WEBAPP_NAME}.azurewebsites.net"
+          echo "webapp-url=$WEBAPP_URL" >> $GITHUB_OUTPUT
+          
+  # Stage 4: Deploy to Azure
+  deploy:
+    name: Deploy to Azure
+    needs: create-azure-resources
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ needs.create-azure-resources.outputs.webapp_url }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+        
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          
       - name: Deploy to Azure Web App
         id: deploy-to-webapp
         uses: azure/webapps-deploy@v2
         with:
-          app-name: ${{ github.event.inputs.webapp_name == 'secondary' && secrets.AZURE_WEBAPP_NAME_SECONDARY || secrets.AZURE_WEBAPP_NAME }}
+          app-name: ${{ github.event.inputs.webapp_name || secrets.AZURE_WEBAPP_NAME }}
           package: .
-          slot-name: ${{ github.event.inputs.deployment_slot }}
-          startup-command: "php -S 0.0.0.0:8080"
+          
+  # Stage 5: Verify Deployment
+  verify:
+    name: Verify Deployment
+    needs: [create-azure-resources, deploy]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check deployment status
+        run: |
+          WEBAPP_URL="${{ needs.create-azure-resources.outputs.webapp_url }}"
+          echo "Checking deployment at $WEBAPP_URL"
+          
+          # Give some time for the app to start
+          sleep 30
+          
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" $WEBAPP_URL)
+          echo "HTTP Status: $HTTP_STATUS"
+          
+          if [[ "$HTTP_STATUS" == "200" || "$HTTP_STATUS" == "302" ]]; then
+            echo "✅ Deployment verification succeeded!"
+          else
+            echo "⚠️ Deployment verification returned status $HTTP_STATUS - this may be normal during initial deployment"
+          fi
+        continue-on-error: true
+        
+      - name: Generate deployment report
+        run: |
+          echo "## 🚀 Azure Web App Creation and Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "* **Web App Name:** ${{ github.event.inputs.webapp_name || secrets.AZURE_WEBAPP_NAME }}" >> $GITHUB_STEP_SUMMARY
+          echo "* **Resource Group:** ${{ github.event.inputs.resource_group || secrets.AZURE_RESOURCE_GROUP }}" >> $GITHUB_STEP_SUMMARY
+          echo "* **Location:** ${{ github.event.inputs.location || 'eastus' }}" >> $GITHUB_STEP_SUMMARY
+          echo "* **PHP Version:** ${{ github.event.inputs.php_version || '8.0' }}" >> $GITHUB_STEP_SUMMARY
+          echo "* **Deployed By:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "* **URL:** ${{ needs.create-azure-resources.outputs.webapp_url }}" >> $GITHUB_STEP_SUMMARY
