@@ -1,118 +1,112 @@
-name: Create and Deploy to Azure Web App with PHP
+name: Azure Web App Deployment Pipeline
+
 on:
   push:
     branches: [main, master]
   workflow_dispatch:
-    inputs:
-      webapp_name:
-        description: 'Web app name'
-        required: true
-        type: string
-      resource_group:
-        description: 'Resource group name'
-        required: true
-        type: string
-      location:
-        description: 'Azure region'
-        required: false
-        default: 'eastus'
-        type: string
-      php_version:
-        description: 'PHP version'
-        required: false
-        default: '8.0'
-        type: string
-      sku:
-        description: 'App Service plan SKU'
-        required: false
-        default: 'B1'
-        type: string
+
+env:
+  AZURE_LOCATION: "eastus"  # Default region
+  PHP_VERSION: "8.0"       # Default PHP version
+  APP_SKU: "B1"            # Default pricing tier
 
 jobs:
-  deploy-to-azure:
-    name: Create and Deploy to Azure
+  deploy:
     runs-on: ubuntu-latest
-    outputs:
-      webapp_url: ${{ steps.create-webapp.outputs.webapp-url }}
+    environment: production
+
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v2
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Validate secrets
+      run: |
+        if [ -z "${{ secrets.AZURE_CREDENTIALS }}" ]; then
+          echo "::error::Azure credentials secret is missing"
+          exit 1
+        fi
+        if [ -z "${{ secrets.AZURE_WEBAPP_NAME }}" ]; then
+          echo "::error::Web app name secret is missing"
+          exit 1
+        fi
+        if [ -z "${{ secrets.AZURE_RESOURCE_GROUP }}" ]; then
+          echo "::error::Resource group secret is missing"
+          exit 1
+        fi
+
+    - name: Login to Azure
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Validate Web App Name
+      run: |
+        WEBAPP_NAME="${{ secrets.AZURE_WEBAPP_NAME }}"
+        if ! [[ "$WEBAPP_NAME" =~ ^[a-z0-9-]{3,50}$ ]]; then
+          echo "::error::Invalid web app name: Must be 3-50 lowercase letters, numbers, or hyphens"
+          exit 1
+        fi
+
+    - name: Create App Service Plan
+      run: |
+        az appservice plan create \
+          --name "${{ secrets.AZURE_WEBAPP_NAME }}-plan" \
+          --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+          --location "$env:AZURE_LOCATION" \
+          --sku "$env:APP_SKU" \
+          --is-linux \
+          --output none
+      continue-on-error: false
+
+    - name: Create Web App
+      run: |
+        az webapp create \
+          --name "${{ secrets.AZURE_WEBAPP_NAME }}" \
+          --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+          --plan "${{ secrets.AZURE_WEBAPP_NAME }}-plan" \
+          --runtime "PHP|$env:PHP_VERSION" \
+          --output none
+
+    - name: Configure Web App
+      run: |
+        # Set PHP version
+        az webapp config set \
+          --name "${{ secrets.AZURE_WEBAPP_NAME }}" \
+          --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+          --php-version "$env:PHP_VERSION"
+
+        # Configure startup command
+        az webapp config appsettings set \
+          --name "${{ secrets.AZURE_WEBAPP_NAME }}" \
+          --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+          --settings WEBSITE_STARTUP_COMMAND="php -S 0.0.0.0:8080"
+
+    - name: Deploy Application
+      uses: azure/webapps-deploy@v2
+      with:
+        app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
+        package: .
+        resource-group: ${{ secrets.AZURE_RESOURCE_GROUP }}
+
+    - name: Verify Deployment
+      run: |
+        DEPLOYMENT_URL="https://${{ secrets.AZURE_WEBAPP_NAME }}.azurewebsites.net"
+        echo "Deployment URL: $DEPLOYMENT_URL"
         
-      - name: Setup PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: "${{ github.event.inputs.php_version || '8.0' }}"
-          extensions: mbstring, intl, gd, xml, zip
-          
-      - name: Install dependencies
-        run: |
-          if [ -f composer.json ]; then
-            composer install --no-interaction --prefer-dist --optimize-autoloader
-          fi
-          
-      - name: Login to Azure
-        uses: azure/login@v1
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-          
-      - name: Validate webapp name
-        run: |
-          WEBAPP_NAME="${{ github.event.inputs.webapp_name }}"
-          if ! [[ $WEBAPP_NAME =~ ^[a-z0-9\-]+$ ]]; then
-            echo "::error::Web app name must contain only lowercase letters, numbers, and hyphens"
-            exit 1
-          fi
-      
-      - name: Create Azure resources
-        id: create-webapp
-        run: |
-          # Set variables
-          RG="${{ github.event.inputs.resource_group }}"
-          LOCATION="${{ github.event.inputs.location || 'eastus' }}"
-          WEBAPP="${{ github.event.inputs.webapp_name }}"
-          PHP_VER="${{ github.event.inputs.php_version || '8.0' }}"
-          SKU="${{ github.event.inputs.sku || 'B1' }}"
-          APP_PLAN="${WEBAPP}-plan"
-          
-            # Create app service plan if not exists
-            if ! az appservice plan show --name "$APP_PLAN" --resource-group "$RG" &>/dev/null; then
-            az appservice plan create --name "$APP_PLAN" --resource-group "$RG" \
-              --location "$LOCATION" --sku "$SKU" --is-linux
-            fi
+        # Wait for deployment to complete
+        sleep 30
+        
+        # Check HTTP status
+        HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$DEPLOYMENT_URL")
+        echo "HTTP Status Code: $HTTP_STATUS"
+        
+        if [ "$HTTP_STATUS" -ne 200 ]; then
+          echo "::warning::Initial deployment check failed. This might be normal during cold start."
+        fi
 
-            # Create web app if not exists
-            if ! az webapp show --name "$WEBAPP" --resource-group "$RG" &>/dev/null; then
-            az webapp create --name "$WEBAPP" --resource-group "$RG" \
-              --plan "$APP_PLAN" --runtime "PHP|$PHP_VER"
-            fi
-
-            # Configure web app
-            az webapp config set --name "$WEBAPP" --resource-group "$RG" --php-version "$PHP_VER"
-            az webapp config appsettings set --name "$WEBAPP" --resource-group "$RG" \
-            --settings WEBSITE_STARTUP_COMMAND="php -S 0.0.0.0:8080"
-
-            # Set output
-            echo "webapp-url=https://${WEBAPP}.azurewebsites.net" >> $GITHUB_OUTPUT
-          
-      - name: Deploy to Azure Web App
-        uses: azure/webapps-deploy@v2
-        with:
-          app-name: ${{ github.event.inputs.webapp_name }}
-          package: .
-          
-      - name: Verify and Report
-        run: |
-          WEBAPP_URL="https://${{ github.event.inputs.webapp_name }}.azurewebsites.net"
-          echo "Checking deployment at $WEBAPP_URL"
-          sleep 20
-          
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" $WEBAPP_URL)
-          echo "HTTP Status: $HTTP_STATUS"
-          
-          # Create deployment report
-          echo "## 🚀 Azure Web App Deployment Report" >> $GITHUB_STEP_SUMMARY
-          echo "* **App:** ${{ github.event.inputs.webapp_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "* **Resource Group:** ${{ github.event.inputs.resource_group }}" >> $GITHUB_STEP_SUMMARY
-          echo "* **PHP Version:** ${{ github.event.inputs.php_version || '8.0' }}" >> $GITHUB_STEP_SUMMARY
-          echo "* **URL:** $WEBAPP_URL" >> $GITHUB_STEP_SUMMARY
-        continue-on-error: true
+        # Add to job summary
+        echo "## Deployment Details" >> $GITHUB_STEP_SUMMARY
+        echo "- **Web App Name**: ${{ secrets.AZURE_WEBAPP_NAME }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Resource Group**: ${{ secrets.AZURE_RESOURCE_GROUP }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **PHP Version**: $env:PHP_VERSION" >> $GITHUB_STEP_SUMMARY
+        echo "- **Access URL**: [$DEPLOYMENT_URL]($DEPLOYMENT_URL)" >> $GITHUB_STEP_SUMMARY
