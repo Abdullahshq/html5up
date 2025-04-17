@@ -5,11 +5,11 @@ on:
   workflow_dispatch:
     inputs:
       webapp_name:
-        description: 'abdapp1'
+        description: 'Web app name'
         required: true
         type: string
       resource_group:
-        description: 'abd-rg'
+        description: 'Resource group name'
         required: true
         type: string
       location:
