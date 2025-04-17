@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       webapp_name:
-        description: 'abdhtml5up'
+        description: 'abd-app'
         required: true
         type: string
       resource_group:
