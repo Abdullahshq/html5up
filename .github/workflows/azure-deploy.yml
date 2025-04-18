@@ -1,112 +1,81 @@
-name: Azure Web App Deployment Pipeline
+name: Deploy PHP App to Azure Web App
 
 on:
   push:
-    branches: [main, master]
+    branches: [ main, master ]
   workflow_dispatch:
+    inputs:
+      webapp_name:
+        description: 'Web App Name'
+        required: true
+      deployment_slot:
+        description: 'Deployment Slot (optional)'
+        required: false
 
 env:
-  AZURE_LOCATION: "eastus"  # Default region
-  PHP_VERSION: "8.0"       # Default PHP version
-  APP_SKU: "B1"            # Default pricing tier
+  AZURE_RESOURCE_GROUP: 'abd-rg'  # Replace with your resource group name
+  AZURE_LOCATION: 'East US'                 # Replace with your desired Azure region
+  AZURE_APP_SERVICE_PLAN: 'abd-plan'  # Replace with your App Service plan name
+  AZURE_WEBAPP_NAME: ${{ github.event.inputs.webapp_name }}
 
 jobs:
-  deploy:
+  # Stage 1: Checkout Code
+  checkout:
+    name: Checkout Code
     runs-on: ubuntu-latest
-    environment: production
-
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v2
 
-    - name: Validate secrets
-      run: |
-        if [ -z "${{ secrets.AZURE_CREDENTIALS }}" ]; then
-          echo "::error::Azure credentials secret is missing"
-          exit 1
-        fi
-        if [ -z "${{ secrets.AZURE_WEBAPP_NAME }}" ]; then
-          echo "::error::Web app name secret is missing"
-          exit 1
-        fi
-        if [ -z "${{ secrets.AZURE_RESOURCE_GROUP }}" ]; then
-          echo "::error::Resource group secret is missing"
-          exit 1
-        fi
+  # Stage 2: Prepare Environment
+  prepare:
+    name: Prepare Environment
+    needs: checkout
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.0'
+          extensions: mbstring, intl, gd, xml, zip
 
-    - name: Login to Azure
-      uses: azure/login@v1
-      with:
-        creds: ${{ secrets.AZURE_CREDENTIALS }}
+  # Stage 3: Create Azure Resources
+  create_resources:
+    name: Create Azure Resources
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-    - name: Validate Web App Name
-      run: |
-        WEBAPP_NAME="${{ secrets.AZURE_WEBAPP_NAME }}"
-        if ! [[ "$WEBAPP_NAME" =~ ^[a-z0-9-]{3,50}$ ]]; then
-          echo "::error::Invalid web app name: Must be 3-50 lowercase letters, numbers, or hyphens"
-          exit 1
-        fi
+      - name: Create Resource Group
+        run: |
+          az group create --name ${{ env.AZURE_RESOURCE_GROUP }} --location "${{ env.AZURE_LOCATION }}"
 
-    - name: Create App Service Plan
-      run: |
-        az appservice plan create \
-          --name "${{ secrets.AZURE_WEBAPP_NAME }}-plan" \
-          --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
-          --location "$env:AZURE_LOCATION" \
-          --sku "$env:APP_SKU" \
-          --is-linux \
-          --output none
-      continue-on-error: false
+      - name: Create App Service Plan
+        run: |
+          az appservice plan create --name ${{ env.AZURE_APP_SERVICE_PLAN }} --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --sku B1 --is-linux
 
-    - name: Create Web App
-      run: |
-        az webapp create \
-          --name "${{ secrets.AZURE_WEBAPP_NAME }}" \
-          --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
-          --plan "${{ secrets.AZURE_WEBAPP_NAME }}-plan" \
-          --runtime "PHP|$env:PHP_VERSION" \
-          --output none
+      - name: Create Web App
+        run: |
+          az webapp create --name ${{ env.AZURE_WEBAPP_NAME }} --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --plan ${{ env.AZURE_APP_SERVICE_PLAN }} --runtime "PHP|8.0"
 
-    - name: Configure Web App
-      run: |
-        # Set PHP version
-        az webapp config set \
-          --name "${{ secrets.AZURE_WEBAPP_NAME }}" \
-          --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
-          --php-version "$env:PHP_VERSION"
+  # Stage 4: Deploy to Azure
+  deploy:
+    name: Deploy to Azure
+    needs: create_resources
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
 
-        # Configure startup command
-        az webapp config appsettings set \
-          --name "${{ secrets.AZURE_WEBAPP_NAME }}" \
-          --resource-group "${{ secrets.AZURE_RESOURCE_GROUP }}" \
-          --settings WEBSITE_STARTUP_COMMAND="php -S 0.0.0.0:8080"
-
-    - name: Deploy Application
-      uses: azure/webapps-deploy@v2
-      with:
-        app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
-        package: .
-        resource-group: ${{ secrets.AZURE_RESOURCE_GROUP }}
-
-    - name: Verify Deployment
-      run: |
-        DEPLOYMENT_URL="https://${{ secrets.AZURE_WEBAPP_NAME }}.azurewebsites.net"
-        echo "Deployment URL: $DEPLOYMENT_URL"
-        
-        # Wait for deployment to complete
-        sleep 35
-        
-        # Check HTTP status
-        HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$DEPLOYMENT_URL")
-        echo "HTTP Status Code: $HTTP_STATUS"
-        
-        if [ "$HTTP_STATUS" -ne 200 ]; then
-          echo "::warning::Initial deployment check failed. This might be normal during cold start."
-        fi
-
-        # Add to job summary
-        echo "## Deployment Details" >> $GITHUB_STEP_SUMMARY
-        echo "- **Web App Name**: ${{ secrets.AZURE_WEBAPP_NAME }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Resource Group**: ${{ secrets.AZURE_RESOURCE_GROUP }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **PHP Version**: $env:PHP_VERSION" >> $GITHUB_STEP_SUMMARY
-        echo "- **Access URL**: [$DEPLOYMENT_URL]($DEPLOYMENT_URL)" >> $GITHUB_STEP_SUMMARY
+      - name: Deploy to Azure Web App
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.AZURE_CREDENTIALS }}
+          package: .
