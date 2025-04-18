@@ -57,7 +57,7 @@ jobs:
 
       - name: Create Web App
         run: |
-          az webapp create --name ${{ env.AZURE_WEBAPP_NAME }} --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --plan ${{ env.AZURE_APP_SERVICE_PLAN }} --runtime "PHP|8.0"
+          az webapp create --name ${{ env.AZURE_WEBAPP_NAME }} --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --plan ${{ env.AZURE_APP_SERVICE_PLAN }} --runtime "PHP|8.4"
 
   # Stage 4: Deploy to Azure
   deploy:
