@@ -8,9 +8,6 @@ on:
       webapp_name:
         description: 'Web App Name'
         required: true
-      deployment_slot:
-        description: 'Deployment Slot (optional)'
-        required: false
 
 env:
   AZURE_RESOURCE_GROUP: 'abd-rg'  # Replace with your resource group name
