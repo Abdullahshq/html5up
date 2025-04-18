@@ -16,7 +16,7 @@ env:
   AZURE_RESOURCE_GROUP: 'abd-rg'  # Replace with your resource group name
   AZURE_LOCATION: 'East US'                 # Replace with your desired Azure region
   AZURE_APP_SERVICE_PLAN: 'abd-plan'  # Replace with your App Service plan name
-  AZURE_WEBAPP_NAME: 'abdapp'
+  AZURE_WEBAPP_NAME: 'abdhtml5'
 
 jobs:
   # Stage 1: Checkout Code
