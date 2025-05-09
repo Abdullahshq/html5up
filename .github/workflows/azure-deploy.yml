@@ -65,7 +65,7 @@ jobs:
 
       - name: Create MySQL Flexible Server
         run: |
-          az mysql flexible-server create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ${{ env.AZURE_DB_SERVER_NAME }} --location "${{ env.AZURE_LOCATION }}" --admin-user ${{ env.AZURE_DB_ADMIN }} --admin-password ${{ secrets.DB_PASSWORD }} --sku-name Standard_B1s --version 8.0 --yes
+          az mysql flexible-server create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ${{ env.AZURE_DB_SERVER_NAME }} --location "${{ env.AZURE_LOCATION }}" --admin-user ${{ env.AZURE_DB_ADMIN }} --admin-password ${{ secrets.DB_PASSWORD }} --sku-name Standard_B1s --version 8.4 --yes
 
       - name: Configure MySQL Flexible Server Firewall
         run: |
