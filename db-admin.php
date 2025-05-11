@@ -5,11 +5,12 @@ $dbname = getenv('DB_NAME');
 $user = getenv('DB_USER');
 $pass = getenv('DB_PASS');
 
-$conn = new mysqli($host, $user, $pass, $dbname, $port);
+$conn = pg_connect("host=$host port=$port dbname=$dbname user=$user password=$pass");
 
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+if (!$conn) {
+    die("Connection failed: " . pg_last_error());
 } else {
     echo "Database connected successfully.";
 }
 ?>
+
