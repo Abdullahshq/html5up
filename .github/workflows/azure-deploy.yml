@@ -11,13 +11,9 @@ on:
 
 env:
   AZURE_RESOURCE_GROUP: 'abd-rg'  # Replace with your resource group name
-  AZURE_LOCATION: 'Central US'                 # Replace with your desired Azure region
+  AZURE_LOCATION: 'East US'                 # Replace with your desired Azure region
   AZURE_APP_SERVICE_PLAN: 'abd-plan'  # Replace with your App Service plan name
   AZURE_WEBAPP_NAME: 'abdhtml5'
-  AZURE_DB_SERVER_NAME: 'abd-mysql-server'  # MySQL server name
-  AZURE_DB_NAME: 'abdhtml5db'               # Database name
-  AZURE_DB_ADMIN: 'abdadmin'                # Database admin username
-  AZURE_DB_PASSWORD: ${{ secrets.DB_PASSWORD }} # Database password from secrets
 
 jobs:
   # Stage 1: Checkout Code
@@ -38,7 +34,7 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'
-          extensions: mbstring, intl, gd, xml, zip, pdo, pdo_mysql
+          extensions: mbstring, intl, gd, xml, zip
 
   # Stage 3: Create Azure Resources
   create_resources:
@@ -62,26 +58,6 @@ jobs:
       - name: Create Web App
         run: |
           az webapp create --name ${{ env.AZURE_WEBAPP_NAME }} --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --plan ${{ env.AZURE_APP_SERVICE_PLAN }} --runtime "PHP|8.4"
-
-      - name: Create MySQL Flexible Server
-        run: |
-          az mysql flexible-server create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ${{ env.AZURE_DB_SERVER_NAME }} --location "${{ env.AZURE_LOCATION }}" --admin-user ${{ env.AZURE_DB_ADMIN }} --admin-password ${{ secrets.DB_PASSWORD }} --sku-name Standard_B1s --version 8.4 --yes
-
-      - name: Configure MySQL Flexible Server Firewall
-        run: |
-          # Allow Azure services
-          az mysql flexible-server firewall-rule create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name AllowAzureServices --server-name ${{ env.AZURE_DB_SERVER_NAME }} --start-ip-address 0.0.0.0 --end-ip-address 0.0.0.0
-          
-          # Allow all connections (for development - restrict this in production)
-          az mysql flexible-server firewall-rule create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name AllowAll --server-name ${{ env.AZURE_DB_SERVER_NAME }} --start-ip-address 0.0.0.0 --end-ip-address 255.255.255.255
-
-      - name: Create MySQL Database
-        run: |
-          az mysql flexible-server db create --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --server-name ${{ env.AZURE_DB_SERVER_NAME }} --database-name ${{ env.AZURE_DB_NAME }}
-
-      - name: Configure Web App Settings
-        run: |
-          az webapp config appsettings set --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --name ${{ env.AZURE_WEBAPP_NAME }} --settings DB_HOST="${{ env.AZURE_DB_SERVER_NAME }}.mysql.database.azure.com" DB_NAME="${{ env.AZURE_DB_NAME }}" DB_USER="${{ env.AZURE_DB_ADMIN }}" DB_PASSWORD="${{ secrets.DB_PASSWORD }}"
 
   # Stage 4: Deploy to Azure
   deploy:
